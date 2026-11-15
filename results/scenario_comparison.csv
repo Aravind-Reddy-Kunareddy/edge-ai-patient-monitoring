@@ -1,0 +1,17 @@
+Target,Offload Percentage,Scenario
+fall_detected,0.1990049751243781,Hybrid Baseline
+abnormal_heart_rhythm,3.383084577114428,Hybrid Baseline
+hypoxemia_event,0.3482587064676617,Hybrid Baseline
+fever_event,0.5472636815920399,Hybrid Baseline
+fall_detected,0.0,Adaptive - Normal
+abnormal_heart_rhythm,0.0,Adaptive - Normal
+hypoxemia_event,0.0,Adaptive - Normal
+fever_event,0.0,Adaptive - Normal
+fall_detected,0.0,Adaptive - Resource Pressure
+abnormal_heart_rhythm,0.0,Adaptive - Resource Pressure
+hypoxemia_event,0.0,Adaptive - Resource Pressure
+fever_event,0.0,Adaptive - Resource Pressure
+fall_detected,0.0,Adaptive - Deadline Exceeded
+abnormal_heart_rhythm,0.0,Adaptive - Deadline Exceeded
+hypoxemia_event,0.0,Adaptive - Deadline Exceeded
+fever_event,0.0,Adaptive - Deadline Exceeded

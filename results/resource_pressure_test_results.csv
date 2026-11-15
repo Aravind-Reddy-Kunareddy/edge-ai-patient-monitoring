@@ -1,0 +1,5 @@
+Target,Accuracy,F1 Score,CPU Usage (%),Available RAM (MB),Upload Speed (Mbps),Download Speed (Mbps),Network Latency (ms),Edge Resource Pressure,Edge Requests,Cloud Requests,Offload Percentage,Cloud Feasible,Estimated Cloud Response (ms),Average Latency (ms),Average Cloud Request Latency (ms)
+fall_detected,0.9995024875621891,0.9933774834437086,28.1,840.45,69.69,15.72,36.43,True,2010,0,0.0,True,36.459627339133576,0.0005335323466219712,0
+abnormal_heart_rhythm,0.9815920398009951,0.8939828080229226,12.6,811.33,69.69,15.72,36.43,True,2010,0,0.0,True,36.45628266251088,0.0003873631798324004,0
+hypoxemia_event,0.9990049751243781,0.9907407407407407,6.2,814.82,69.69,15.72,36.43,True,2010,0,0.0,True,36.4573125630099,0.00044194028993132546,0
+fever_event,0.9945273631840796,0.9493087557603687,4.1,801.92,69.69,15.72,36.43,True,2010,0,0.0,True,36.456040821712264,0.00033681592220598044,0
