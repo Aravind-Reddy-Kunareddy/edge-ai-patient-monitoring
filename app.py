@@ -478,7 +478,8 @@ pages = [
     "Run Predictions",
     "Strategy Comparison",
     "Resource Monitoring",
-    "Experiment Results"
+    "Experiment Results",
+    "EdgeSimPy Simulation"
 ]
 
 for page_name in pages:
@@ -543,13 +544,44 @@ if st.session_state.page == "Project Overview":
 
     st.write(
         """
-        This project develops an intelligent patient monitoring
-        system using Edge AI and Cloud AI.
-
-        It aims to process patient sensor data efficiently by
-        deciding whether predictions should be generated locally
-        using an Edge model or remotely using a Cloud model.
+        This project develops a resource-aware patient monitoring
+        system that combines Edge AI and Cloud AI. Patient sensor
+        data is processed locally first, and Cloud processing is
+        considered only when Edge prediction confidence is low
+        and the available system/network resources allow it.
         """
+    )
+
+    st.subheader("Simulation Experiments")
+
+    st.markdown(
+        """
+        **1. Edge–Cloud infrastructure simulation (EdgeSimPy)**
+
+        EdgeSimPy is used to study the behavior of an edge/cloud
+        infrastructure and resource-allocation scenarios.
+
+        **2. Confidence-based patient-monitoring offloading experiment**
+
+        A full experiment was run using **10,000 patient samples**
+        across **4 prediction targets**, producing **40,000 tasks**.
+        The Edge model is selected when its confidence is at least
+        90%. For low-confidence tasks, resource conditions are
+        checked and Cloud is selected when available; otherwise,
+        the task falls back to Edge.
+        """
+    )
+
+    overview_metrics = st.columns(4)
+    overview_metrics[0].metric("Samples", "10,000")
+    overview_metrics[1].metric("Prediction tasks", "40,000")
+    overview_metrics[2].metric("Final accuracy", "99.7775%")
+    overview_metrics[3].metric("Cloud offloading", "1.74%")
+
+    st.caption(
+        "The detailed results and comparative visualizations are available "
+        "under the EdgeSimPy Simulation page. The currently displayed "
+        "metrics are from the confidence-based patient-monitoring experiment."
     )
 
     st.divider()
@@ -663,6 +695,8 @@ if st.session_state.page == "Project Overview":
     - **Resource Monitoring:** Monitor CPU, RAM and network.
     - **Experiment Results:** Explore saved experimental
       results and visualizations.
+    - **EdgeSimPy Simulation:** View simulation metrics,
+      execution distribution, latency comparisons and graphs.
     """)
 
     st.warning(
@@ -1426,3 +1460,282 @@ elif st.session_state.page == "Experiment Results":
             "Experiment tables and plots are loaded from saved result files. "
             "Missing files are not replaced with estimated or fabricated results."
         )
+
+# ============================================================
+# EDGESIMPY / OFFLOADING SIMULATION RESULTS
+# ============================================================
+
+elif st.session_state.page == "EdgeSimPy Simulation":
+
+    st.title("EdgeSimPy Simulation Results")
+    st.subheader("Confidence-Based Edge–Cloud Patient Monitoring")
+
+    st.write(
+        "Comparative visualizations of the completed simulation using "
+        "the supplied summary metrics. This experiment processed "
+        "10,000 samples across four targets (40,000 tasks)."
+    )
+
+    st.info(
+        "The metrics displayed below are from the completed confidence-based "
+        "offloading experiment. They should not be interpreted as raw "
+        "EdgeSimPy infrastructure metrics unless that experiment produced "
+        "this exact summary."
+    )
+
+    # --------------------------------------------------------
+    # FINAL KPI METRICS
+    # --------------------------------------------------------
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Overall Accuracy", "99.7775%")
+    kpi2.metric("Total Tasks", "40,000")
+    kpi3.metric("Cloud Offloading", "1.74%")
+    kpi4.metric("Simulation Runtime", "42.71 min")
+
+    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+    kpi5.metric("Edge Tasks", "39,135")
+    kpi6.metric("Cloud Tasks", "696")
+    kpi7.metric("Edge Fallback", "169")
+    kpi8.metric("Confidence Threshold", "90%")
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # EXECUTION DISTRIBUTION
+    # --------------------------------------------------------
+
+    st.subheader("1. Execution Distribution")
+
+    execution_df = pd.DataFrame({
+        "Execution Mode": ["Edge", "Cloud", "Edge Fallback"],
+        "Tasks": [39135, 696, 169],
+        "Percentage": [97.8375, 1.74, 0.4225]
+    })
+
+    left, right = st.columns(2)
+
+    with left:
+        fig = px.pie(
+            execution_df,
+            names="Execution Mode",
+            values="Tasks",
+            title="Distribution of 40,000 Tasks",
+            hole=0.45
+        )
+        fig.update_traces(textinfo="label+percent")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with right:
+        fig = px.bar(
+            execution_df,
+            x="Execution Mode",
+            y="Tasks",
+            text="Tasks",
+            title="Task Count by Execution Mode"
+        )
+        fig.update_layout(yaxis_title="Number of Tasks")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(execution_df, use_container_width=True, hide_index=True)
+
+    st.markdown(
+        """
+        **Interpretation:** Most tasks were completed directly on Edge.
+        Only low-confidence tasks with available Cloud resources were
+        offloaded. When Cloud resources were unavailable, the task
+        remained on Edge through fallback.
+        """
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # LATENCY COMPARISON
+    # --------------------------------------------------------
+
+    st.subheader("2. Latency and Overhead Comparison")
+
+    latency_df = pd.DataFrame({
+        "Metric": [
+            "Average Edge inference",
+            "Average Cloud inference",
+            "Average resource check (all tasks)",
+            "Average network delay"
+        ],
+        "Latency (ms)": [
+            0.546135,
+            0.011522,
+            58.257700,
+            0.369054
+        ]
+    })
+
+    fig = px.bar(
+        latency_df,
+        x="Metric",
+        y="Latency (ms)",
+        text="Latency (ms)",
+        title="Average Latency Components",
+        log_y=True
+    )
+    fig.update_traces(texttemplate="%{y:.4f} ms", textposition="outside")
+    fig.update_layout(yaxis_title="Milliseconds (log scale)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(latency_df, use_container_width=True, hide_index=True)
+
+    st.caption(
+        "A logarithmic y-axis is used because the latency components differ "
+        "substantially in magnitude."
+    )
+
+    st.metric("Average overall latency", "59.1844 ms")
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # RESOURCE CHECK OVERHEAD
+    # --------------------------------------------------------
+
+    st.subheader("3. Resource-Check Overhead")
+
+    resource_df = pd.DataFrame({
+        "Category": [
+            "Average across all tasks",
+            "Average for low-confidence tasks"
+        ],
+        "Average Check Time (ms)": [
+            58.257700,
+            2693.997707
+        ]
+    })
+
+    fig = px.bar(
+        resource_df,
+        x="Category",
+        y="Average Check Time (ms)",
+        text="Average Check Time (ms)",
+        title="Resource-Check Time Comparison"
+    )
+    fig.update_traces(texttemplate="%{y:.2f} ms", textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(resource_df, use_container_width=True, hide_index=True)
+
+    st.metric("Total resource-check time", "2,330,308 ms", "≈ 38.84 minutes")
+
+    st.warning(
+        "Resource measurement is the major overhead in this experiment. "
+        "The low-confidence task checks take much longer on average than "
+        "model inference itself."
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # ACCURACY BY TARGET
+    # --------------------------------------------------------
+
+    st.subheader("4. Target-Wise Accuracy")
+
+    target_accuracy_df = pd.DataFrame({
+        "Target": [
+            "Abnormal heart rhythm",
+            "Fall detection",
+            "Fever event",
+            "Hypoxemia event"
+        ],
+        "Accuracy (%)": [99.46, 99.97, 99.81, 99.87]
+    })
+
+    fig = px.bar(
+        target_accuracy_df,
+        x="Target",
+        y="Accuracy (%)",
+        text="Accuracy (%)",
+        title="Accuracy Across Patient-Monitoring Targets",
+        range_y=[95, 100]
+    )
+    fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(target_accuracy_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # CLOUD OFFLOADING / FALLBACK
+    # --------------------------------------------------------
+
+    st.subheader("5. Cloud Offloading and Fallback")
+
+    offloading_df = pd.DataFrame({
+        "Decision": [
+            "High Edge confidence",
+            "Low confidence and Cloud available",
+            "Low confidence but Cloud unavailable"
+        ],
+        "Tasks": [39135, 696, 169]
+    })
+
+    fig = px.bar(
+        offloading_df,
+        x="Decision",
+        y="Tasks",
+        text="Tasks",
+        title="Tasks by Offloading Decision",
+        color="Decision"
+    )
+    fig.update_layout(xaxis_title="", yaxis_title="Task Count")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(offloading_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # FINAL SUMMARY TABLE
+    # --------------------------------------------------------
+
+    st.subheader("6. Complete Simulation Summary")
+
+    summary_df = pd.DataFrame([{
+        "Total Samples": 10000,
+        "Total Tasks": 40000,
+        "Accuracy (%)": 99.7775,
+        "Confidence Threshold": 0.90,
+        "Low Confidence Tasks": 865,
+        "Edge Tasks": 39135,
+        "Edge Fallback Tasks": 169,
+        "Cloud Tasks": 696,
+        "Cloud Offloading (%)": 1.74,
+        "Average Latency (ms)": 59.18441197394945,
+        "Average Edge Inference (ms)": 0.5461351525125793,
+        "Average Cloud Inference (ms)": 0.011522145003982586,
+        "Average Resource Check (all tasks, ms)": 58.257700419998585,
+        "Average Resource Check (low confidence, ms)": 2693.9977072831716,
+        "Total Resource Check Time (ms)": 2330308.0167999435,
+        "Average Network Delay (ms)": 0.3690542564343129,
+        "Simulation Time (seconds)": 2562.7612057000224,
+        "Simulation Time (minutes)": 42.71268676166704
+    }])
+
+    st.dataframe(
+        summary_df.T.rename(columns={0: "Value"}),
+        use_container_width=True
+    )
+
+    st.download_button(
+        "Download Simulation Summary CSV",
+        data=summary_df.to_csv(index=False).encode("utf-8"),
+        file_name="confidence_offloading_summary.csv",
+        mime="text/csv"
+    )
+
+    st.caption(
+        "Cloud inference was simulated using a separately saved Cloud model "
+        "on the same machine; this experiment did not execute on a remote "
+        "Cloud server. Results are for research demonstration, not clinical use."
+    )
+
