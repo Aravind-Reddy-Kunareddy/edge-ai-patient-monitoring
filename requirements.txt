@@ -6,4 +6,3 @@ joblib
 psutil
 plotly
 speedtest-cli
-edgesimpy
