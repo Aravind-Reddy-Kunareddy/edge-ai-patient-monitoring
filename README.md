@@ -124,8 +124,8 @@ The experimental configuration uses the following thresholds:
 | Minimum upload bandwidth | 5 Mbps |
 | Minimum download bandwidth | 2 Mbps |
 | Maximum network latency | 100 ms |
-| Maximum CPU utilization | 85% |
-| Minimum available RAM | 500 MB |
+| Maximum CPU utilization | 90% |
+| Minimum available RAM | 750 MB |
 
 These thresholds can be configured to evaluate different operating conditions.
 
