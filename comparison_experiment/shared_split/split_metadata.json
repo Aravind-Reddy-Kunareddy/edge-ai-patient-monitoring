@@ -1,0 +1,19 @@
+{
+    "dataset_path": "C:\\Users\\aravi\\Projects\\SEMESTER_5\\EDGE_AI\\data\\data.csv",
+    "total_samples": 10000,
+    "train_samples": 7990,
+    "test_samples": 2010,
+    "test_size": 0.2,
+    "random_state": 42,
+    "patient_wise_split": true,
+    "confidence_threshold": 0.8,
+    "deadline_ms": 5,
+    "max_cpu_usage_percent": 90,
+    "min_available_ram_mb": 750,
+    "targets": [
+        "fall_detected",
+        "abnormal_heart_rhythm",
+        "hypoxemia_event",
+        "fever_event"
+    ]
+}

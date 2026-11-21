@@ -2835,4 +2835,8 @@ elif st.session_state.page == "Comparison Results":
     st.caption(
         "All charts use saved experimental results. No simulations "
         "were rerun while displaying this page."
+<<<<<<< HEAD
     )
+=======
+    )
+>>>>>>> 7692ee5 (Add confidence offloading and comparison experiments)

@@ -1,0 +1,17 @@
+Metric,Custom Adaptive,EdgeSimPy
+Total Samples,10000.0,10000.0
+Total Tasks,40000.0,40000.0
+Accuracy (%),99.8225,99.5675
+Macro F1 Score (%),98.57428587291074,96.92197178169343
+Edge Direct Tasks,39135.0,39135.0
+Edge Fallback Tasks,0.0,742.0
+Total Edge Executions,39135.0,39877.0
+Cloud Tasks,865.0,123.0
+Cloud Offloading (%),2.1624999999999996,0.3075
+Average Latency (ms),0.7789653837405618,249.94153656332512
+Latency Excluding Resource Checks (ms),0.7789653837405618,0.6127639008247657
+Average Resource Check (ms/task),2039.4933249990572,249.32877266250034
+Total Resource Check Time (ms),8157.973299996229,9973150.906500014
+Average Network Delay (ms),35.955067109391514,0.09714489830094802
+Average Cloud Request Latency (ms),35.979749874800945,
+Simulation Runtime (minutes),,169.89185800666672
