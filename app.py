@@ -22,6 +22,45 @@ st.set_page_config(
     layout="wide"
 )
 
+
+# ============================================================
+# PATHS
+# ============================================================
+
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+COMPARISON_DIR = os.path.join(
+    PROJECT_DIR,
+    "comparison_experiment",
+    "results",
+    "final"
+)
+
+SYSTEM_COMPARISON_PATH = os.path.join(
+    COMPARISON_DIR,
+    "system_comparison.csv"
+)
+
+TARGET_COMPARISON_PATH = os.path.join(
+    COMPARISON_DIR,
+    "target_wise_comparison.csv"
+)
+
+EDGESIMPY_RESULTS_DIR = os.path.join(
+    PROJECT_DIR,
+    "comparison_experiment",
+    "results",
+    "edgesimpy"
+)
+
+CUSTOM_RESULTS_DIR = os.path.join(
+    PROJECT_DIR,
+    "comparison_experiment",
+    "results",
+    "custom"
+)
+
+
 # ============================================================
 # CONSTANTS
 # ============================================================
@@ -59,12 +98,12 @@ FEATURE_COLUMNS = [
     "breathing_interval_s"
 ]
 
-CONFIDENCE_THRESHOLD = 0.95
+CONFIDENCE_THRESHOLD = 0.90
 HYBRID_BANDWIDTH_MBPS = 5
 HYBRID_NETWORK_LATENCY_MS = 10
-DEADLINE_MS = 5
-MAX_CPU_USAGE_PERCENT = 85
-MIN_AVAILABLE_RAM_MB = 1000
+DEADLINE_MS = 100
+MAX_CPU_USAGE_PERCENT = 90
+MIN_AVAILABLE_RAM_MB = 750
 
 RESULTS_DIR_CANDIDATES = ["results", "Results"]
 
@@ -75,11 +114,13 @@ RESULTS_DIR_CANDIDATES = ["results", "Results"]
 
 def find_results_file(base_name):
     """Find a result file regardless of results-folder case or extension."""
+
     extensions = [".csv", ".xls", ".xlsx"]
 
     for folder in RESULTS_DIR_CANDIDATES:
         for extension in extensions:
             path = os.path.join(folder, base_name + extension)
+
             if os.path.exists(path):
                 return path
 
@@ -88,9 +129,10 @@ def find_results_file(base_name):
 
 def read_result_file(base_name):
     """
-    The supplied result files have CSV text inside files named .xls.
-    Try CSV first, then Excel as a fallback.
+    The supplied result files may contain CSV text inside files
+    named .xls. Try CSV first, then Excel as fallback.
     """
+
     path = find_results_file(base_name)
 
     if path is None:
@@ -98,20 +140,25 @@ def read_result_file(base_name):
 
     try:
         return pd.read_csv(path)
+
     except Exception:
         try:
             return pd.read_excel(path)
+
         except Exception as error:
-            st.warning(f"Could not read {os.path.basename(path)}: {error}")
+            st.warning(
+                f"Could not read {os.path.basename(path)}: {error}"
+            )
             return None
 
 
 def get_value(dictionary, possible_keys, default=None):
-    """Read a value from a dictionary using possible key names."""
+
     if not isinstance(dictionary, dict):
         return default
 
     for key in possible_keys:
+
         if key in dictionary:
             return dictionary[key]
 
@@ -125,6 +172,7 @@ def calculate_network_delay(
     download_mbps,
     network_latency_ms
 ):
+
     if upload_mbps is None or download_mbps is None:
         return float("inf")
 
@@ -147,25 +195,40 @@ def calculate_network_delay(
 
 
 def get_model_prediction(model, scaler, input_data):
+
     scaled_data = scaler.transform(input_data)
 
     start_time = time.perf_counter()
+
     prediction = model.predict(scaled_data)
-    inference_latency = (time.perf_counter() - start_time) * 1000
+
+    inference_latency = (
+        time.perf_counter() - start_time
+    ) * 1000
 
     probabilities = model.predict_proba(scaled_data)
+
     confidence = float(np.max(probabilities[0]))
 
-    return int(prediction[0]), confidence, inference_latency
+    return (
+        int(prediction[0]),
+        confidence,
+        inference_latency
+    )
 
 
 def get_resource_values():
-    """Read current resource values without assuming one fixed key spelling."""
+
     resources = get_all_resources(test_internet=False)
 
     cpu = get_value(
         resources,
-        ["cpu_percent", "cpu_usage", "CPU Usage (%)", "cpu"],
+        [
+            "cpu_percent",
+            "cpu_usage",
+            "CPU Usage (%)",
+            "cpu"
+        ]
     )
 
     ram = get_value(
@@ -176,41 +239,141 @@ def get_resource_values():
             "ram_available_mb",
             "available_ram",
             "Available RAM (MB)"
-        ],
+        ]
     )
 
     return resources, cpu, ram
 
 
 def get_network_values():
+
     network = measure_network()
 
     upload = get_value(
         network,
-        ["upload_mbps", "upload_speed_mbps", "Upload Speed (Mbps)"]
+        [
+            "upload_mbps",
+            "upload_speed_mbps",
+            "Upload Speed (Mbps)"
+        ]
     )
 
     download = get_value(
         network,
-        ["download_mbps", "download_speed_mbps", "Download Speed (Mbps)"]
+        [
+            "download_mbps",
+            "download_speed_mbps",
+            "Download Speed (Mbps)"
+        ]
     )
 
     latency = get_value(
         network,
-        ["latency_ms", "network_latency_ms", "Network Latency (ms)"]
+        [
+            "latency_ms",
+            "network_latency_ms",
+            "Network Latency (ms)"
+        ]
     )
 
     return network, upload, download, latency
 
 
-def run_one_target(target, strategy, input_data, models, scalers):
+# ============================================================
+# COMPARISON DATA FUNCTIONS
+# ============================================================
+
+def load_comparison_data():
+
+    system_df = None
+    target_df = None
+
+    if os.path.exists(SYSTEM_COMPARISON_PATH):
+
+        system_df = pd.read_csv(
+            SYSTEM_COMPARISON_PATH
+        )
+
+    if os.path.exists(TARGET_COMPARISON_PATH):
+
+        target_df = pd.read_csv(
+            TARGET_COMPARISON_PATH
+        )
+
+    return system_df, target_df
+
+
+def get_comparison_metric(
+    system_df,
+    metric_name,
+    system_name,
+    default=np.nan
+):
+
+    if system_df is None:
+        return default
+
+    row = system_df[
+        system_df["Metric"] == metric_name
+    ]
+
+    if row.empty:
+        return default
+
+    if system_name not in row.columns:
+        return default
+
+    return row[system_name].iloc[0]
+
+
+def make_comparison_chart(
+    dataframe,
+    x,
+    y,
+    title,
+    color=None,
+    barmode=None,
+    text=None
+):
+
+    fig = px.bar(
+        dataframe,
+        x=x,
+        y=y,
+        color=color,
+        barmode=barmode,
+        text=text,
+        title=title
+    )
+
+    fig.update_layout(
+        template="plotly_white"
+    )
+
+    return fig
+
+
+# ============================================================
+# RUN PREDICTION FUNCTION
+# ============================================================
+
+def run_one_target(
+    target,
+    strategy,
+    input_data,
+    models,
+    scalers
+):
+
     edge_model = models["edge"][target]
     cloud_model = models["cloud"][target]
 
-    edge_prediction, edge_confidence, edge_latency = get_model_prediction(
-        edge_model,
-        scalers["edge"],
-        input_data
+    edge_prediction, edge_confidence, edge_latency = (
+        get_model_prediction(
+            edge_model,
+            scalers["edge"],
+            input_data
+        )
     )
 
     result = {
@@ -219,44 +382,72 @@ def run_one_target(target, strategy, input_data, models, scalers):
         "Prediction": None,
         "Confidence (%)": None,
         "Selected Model": None,
+
         "Edge Prediction": edge_prediction,
         "Edge Confidence (%)": edge_confidence * 100,
         "Edge Latency (ms)": edge_latency,
+
         "Cloud Prediction": None,
         "Cloud Confidence (%)": None,
         "Cloud Latency (ms)": None,
+
         "Network Delay (ms)": None,
         "Estimated Cloud Time (ms)": None,
+
         "Resource Pressure": None,
         "Cloud Feasible": None
     }
 
+    # --------------------------------------------------------
+    # EDGE ONLY
+    # --------------------------------------------------------
+
     if strategy == "Edge Only":
+
         result["Prediction"] = edge_prediction
         result["Confidence (%)"] = edge_confidence * 100
         result["Selected Model"] = "Edge"
 
+    # --------------------------------------------------------
+    # CLOUD ONLY
+    # --------------------------------------------------------
+
     elif strategy == "Cloud Only":
-        cloud_prediction, cloud_confidence, cloud_latency = get_model_prediction(
-            cloud_model,
-            scalers["cloud"],
-            input_data
+
+        cloud_prediction, cloud_confidence, cloud_latency = (
+            get_model_prediction(
+                cloud_model,
+                scalers["cloud"],
+                input_data
+            )
         )
 
         result["Prediction"] = cloud_prediction
         result["Confidence (%)"] = cloud_confidence * 100
         result["Selected Model"] = "Cloud"
+
         result["Cloud Prediction"] = cloud_prediction
         result["Cloud Confidence (%)"] = cloud_confidence * 100
         result["Cloud Latency (ms)"] = cloud_latency
 
+    # --------------------------------------------------------
+    # HYBRID OFFLOADING
+    # --------------------------------------------------------
+
     elif strategy == "Hybrid Offloading":
+
         if edge_confidence >= CONFIDENCE_THRESHOLD:
+
             result["Prediction"] = edge_prediction
             result["Confidence (%)"] = edge_confidence * 100
             result["Selected Model"] = "Edge"
+
         else:
-            request_size = input_data.memory_usage(deep=True).sum()
+
+            request_size = input_data.memory_usage(
+                deep=True
+            ).sum()
+
             network_delay = calculate_network_delay(
                 request_size,
                 8,
@@ -265,53 +456,70 @@ def run_one_target(target, strategy, input_data, models, scalers):
                 HYBRID_NETWORK_LATENCY_MS
             )
 
-            cloud_prediction, cloud_confidence, cloud_latency = get_model_prediction(
-                cloud_model,
-                scalers["cloud"],
-                input_data
+            cloud_prediction, cloud_confidence, cloud_latency = (
+                get_model_prediction(
+                    cloud_model,
+                    scalers["cloud"],
+                    input_data
+                )
             )
 
             result["Prediction"] = cloud_prediction
             result["Confidence (%)"] = cloud_confidence * 100
             result["Selected Model"] = "Cloud"
+
             result["Cloud Prediction"] = cloud_prediction
             result["Cloud Confidence (%)"] = cloud_confidence * 100
             result["Cloud Latency (ms)"] = cloud_latency
+
             result["Network Delay (ms)"] = network_delay
 
+    # --------------------------------------------------------
+    # ADAPTIVE OFFLOADING
+    # --------------------------------------------------------
+
     elif strategy == "Adaptive Offloading":
-        # Adaptive flow: run Edge first. Only inspect resources and consider
-        # Cloud when Edge confidence is below the configured threshold.
+
         result["CPU Usage (%)"] = None
         result["Available RAM (MB)"] = None
+
         result["CPU Threshold (%)"] = MAX_CPU_USAGE_PERCENT
         result["RAM Threshold (MB)"] = MIN_AVAILABLE_RAM_MB
         result["Deadline Threshold (ms)"] = DEADLINE_MS
+
         result["Decision Reason"] = ""
 
+        # High confidence: Edge
         if edge_confidence >= CONFIDENCE_THRESHOLD:
+
             result["Prediction"] = edge_prediction
             result["Confidence (%)"] = edge_confidence * 100
             result["Selected Model"] = "Edge"
+
             result["Resource Pressure"] = False
             result["Cloud Feasible"] = None
+
             result["Decision Reason"] = (
-                f"Edge confidence ({edge_confidence * 100:.2f}%) is at or above "
-                f"the {CONFIDENCE_THRESHOLD * 100:.0f}% threshold. Cloud offloading "
-                "was not needed, so resource checks were skipped."
+                f"Edge confidence ({edge_confidence * 100:.2f}%) "
+                f"is at or above the {CONFIDENCE_THRESHOLD * 100:.0f}% "
+                f"threshold. Cloud offloading was not needed."
             )
+
         else:
-            # Edge confidence is low: check system resources before Cloud.
+
+            # Low confidence: check resources
             resources, cpu, ram = get_resource_values()
 
             if cpu is None or ram is None:
+
                 raise ValueError(
-                    "Could not identify CPU/RAM values returned by system_monitor.py. "
-                    f"Available resource keys: {list(resources.keys())}"
+                    "Could not identify CPU/RAM values returned "
+                    f"by system_monitor.py. Keys: {list(resources.keys())}"
                 )
 
             cpu = float(cpu)
             ram = float(ram)
+
             result["CPU Usage (%)"] = cpu
             result["Available RAM (MB)"] = ram
 
@@ -319,64 +527,103 @@ def run_one_target(target, strategy, input_data, models, scalers):
                 cpu >= MAX_CPU_USAGE_PERCENT
                 or ram <= MIN_AVAILABLE_RAM_MB
             )
+
             result["Resource Pressure"] = resource_pressure
 
+            # Resource pressure: fallback to Edge
             if resource_pressure:
+
                 reasons = []
+
                 if cpu >= MAX_CPU_USAGE_PERCENT:
+
                     reasons.append(
-                        f"CPU usage is {cpu:.2f}%, which reaches/exceeds the "
-                        f"{MAX_CPU_USAGE_PERCENT}% limit"
+                        f"CPU usage is {cpu:.2f}%, "
+                        f"reaching the {MAX_CPU_USAGE_PERCENT}% limit"
                     )
+
                 if ram <= MIN_AVAILABLE_RAM_MB:
+
                     reasons.append(
-                        f"available RAM is {ram:.2f} MB, which is at/below the "
-                        f"{MIN_AVAILABLE_RAM_MB} MB minimum"
+                        f"available RAM is {ram:.2f} MB, "
+                        f"below the {MIN_AVAILABLE_RAM_MB} MB minimum"
                     )
 
                 result["Prediction"] = edge_prediction
                 result["Confidence (%)"] = edge_confidence * 100
                 result["Selected Model"] = "Edge"
-                result["Cloud Feasible"] = False
-                result["Decision Reason"] = (
-                    "Cloud model was NOT executed because resource pressure was "
-                    "detected: " + "; ".join(reasons) + ". The Edge prediction "
-                    "is shown instead."
-                )
-            else:
-                # Resources are sufficient. Now verify whether the network and
-                # cloud processing estimate can satisfy the 5 ms deadline.
-                network, upload, download, network_latency = get_network_values()
 
-                if upload is None or download is None or network_latency is None:
+                result["Cloud Feasible"] = False
+
+                result["Decision Reason"] = (
+                    "Cloud was not executed because resource "
+                    "pressure was detected: "
+                    + "; ".join(reasons)
+                )
+
+            else:
+
+                # Resource conditions are satisfied
+                network, upload, download, network_latency = (
+                    get_network_values()
+                )
+
+                if (
+                    upload is None
+                    or download is None
+                    or network_latency is None
+                ):
+
                     raise ValueError(
-                        "Could not identify network values returned by "
-                        f"network_monitor.py. Available keys: {list(network.keys())}"
+                        "Could not identify network values returned "
+                        f"by network_monitor.py. Keys: {list(network.keys())}"
                     )
 
                 upload = float(upload)
                 download = float(download)
                 network_latency = float(network_latency)
 
-                cloud_benchmark = read_result_file("cloud_only_results")
+                cloud_benchmark = read_result_file(
+                    "cloud_only_results"
+                )
+
                 cloud_processing_time = 0.0
 
-                if cloud_benchmark is not None and "Target" in cloud_benchmark.columns:
+                if (
+                    cloud_benchmark is not None
+                    and "Target" in cloud_benchmark.columns
+                ):
+
                     cloud_row = cloud_benchmark[
-                        cloud_benchmark["Target"].astype(str) == target
+                        cloud_benchmark["Target"].astype(str)
+                        == target
                     ]
+
                     if not cloud_row.empty:
+
                         processing_column = next(
-                            (column for column in ["Cloud Processing (ms)", "Cloud Latency (ms)", "Average Latency (ms)"]
-                             if column in cloud_row.columns),
+                            (
+                                column
+                                for column in [
+                                    "Cloud Processing (ms)",
+                                    "Cloud Latency (ms)",
+                                    "Average Latency (ms)"
+                                ]
+                                if column in cloud_row.columns
+                            ),
                             None
                         )
+
                         if processing_column:
+
                             cloud_processing_time = float(
                                 cloud_row[processing_column].iloc[0]
                             )
 
-                request_size = int(input_data.memory_usage(deep=True).sum())
+                request_size = int(
+                    input_data.memory_usage(deep=True).sum()
+                )
+
                 network_delay = calculate_network_delay(
                     request_size,
                     8,
@@ -384,43 +631,57 @@ def run_one_target(target, strategy, input_data, models, scalers):
                     download,
                     network_latency
                 )
-                estimated_cloud_time = network_delay + cloud_processing_time
-                cloud_feasible = estimated_cloud_time <= DEADLINE_MS
+
+                estimated_cloud_time = (
+                    network_delay + cloud_processing_time
+                )
+
+                cloud_feasible = (
+                    estimated_cloud_time <= DEADLINE_MS
+                )
 
                 result["Network Delay (ms)"] = network_delay
                 result["Estimated Cloud Time (ms)"] = estimated_cloud_time
                 result["Cloud Feasible"] = cloud_feasible
 
+                # Cloud feasible
                 if cloud_feasible:
-                    cloud_prediction, cloud_confidence, cloud_latency = get_model_prediction(
-                        cloud_model,
-                        scalers["cloud"],
-                        input_data
+
+                    cloud_prediction, cloud_confidence, cloud_latency = (
+                        get_model_prediction(
+                            cloud_model,
+                            scalers["cloud"],
+                            input_data
+                        )
                     )
 
                     result["Prediction"] = cloud_prediction
                     result["Confidence (%)"] = cloud_confidence * 100
                     result["Selected Model"] = "Cloud"
+
                     result["Cloud Prediction"] = cloud_prediction
                     result["Cloud Confidence (%)"] = cloud_confidence * 100
                     result["Cloud Latency (ms)"] = cloud_latency
+
                     result["Decision Reason"] = (
-                        f"Edge confidence ({edge_confidence * 100:.2f}%) is below "
-                        f"the {CONFIDENCE_THRESHOLD * 100:.0f}% threshold. CPU and RAM "
-                        "are within limits, and estimated Cloud time "
-                        f"({estimated_cloud_time:.3f} ms) meets the {DEADLINE_MS} ms "
-                        "deadline. Cloud model was executed."
+                        f"Edge confidence ({edge_confidence * 100:.2f}%) "
+                        f"is below threshold. Resources are sufficient "
+                        f"and estimated Cloud time "
+                        f"({estimated_cloud_time:.3f} ms) meets the "
+                        f"{DEADLINE_MS} ms deadline."
                     )
+
+                # Cloud deadline cannot be met
                 else:
+
                     result["Prediction"] = edge_prediction
                     result["Confidence (%)"] = edge_confidence * 100
                     result["Selected Model"] = "Edge"
+
                     result["Decision Reason"] = (
-                        f"Edge confidence ({edge_confidence * 100:.2f}%) is below "
-                        f"the {CONFIDENCE_THRESHOLD * 100:.0f}% threshold, but Cloud "
-                        f"was not executed because estimated Cloud time "
-                        f"({estimated_cloud_time:.3f} ms) exceeds the "
-                        f"{DEADLINE_MS} ms deadline. The Edge prediction is shown."
+                        f"Cloud was not selected because estimated "
+                        f"Cloud time ({estimated_cloud_time:.3f} ms) "
+                        f"exceeds the {DEADLINE_MS} ms deadline."
                     )
 
     return result
@@ -432,10 +693,22 @@ def run_one_target(target, strategy, input_data, models, scalers):
 
 @st.cache_resource
 def load_models():
-    edge_models = joblib.load("models/edge_models.pkl")
-    edge_scaler = joblib.load("models/scaler.pkl")
-    cloud_models = joblib.load("models/cloud_models.pkl")
-    cloud_scaler = joblib.load("models/cloud_scaler.pkl")
+
+    edge_models = joblib.load(
+        os.path.join(PROJECT_DIR, "models", "edge_models.pkl")
+    )
+
+    edge_scaler = joblib.load(
+        os.path.join(PROJECT_DIR, "models", "scaler.pkl")
+    )
+
+    cloud_models = joblib.load(
+        os.path.join(PROJECT_DIR, "models", "cloud_models.pkl")
+    )
+
+    cloud_scaler = joblib.load(
+        os.path.join(PROJECT_DIR, "models", "cloud_scaler.pkl")
+    )
 
     return {
         "edge": edge_models,
@@ -447,10 +720,14 @@ def load_models():
 
 
 try:
+
     models, scalers = load_models()
     models_loaded = True
+
 except Exception as error:
+
     models_loaded = False
+
     st.error(f"Model loading failed: {error}")
     st.stop()
 
@@ -460,9 +737,11 @@ except Exception as error:
 # ============================================================
 
 if "page" not in st.session_state:
+
     st.session_state.page = "Project Overview"
 
 if "prediction_results" not in st.session_state:
+
     st.session_state.prediction_results = None
 
 
@@ -479,14 +758,23 @@ pages = [
     "Strategy Comparison",
     "Resource Monitoring",
     "Experiment Results",
-    "EdgeSimPy Simulation"
+    "EdgeSimPy Simulation",
+    "Comparison Results"
 ]
 
 for page_name in pages:
-    if st.sidebar.button(page_name, use_container_width=True):
+
+    if st.sidebar.button(
+        page_name,
+        use_container_width=True,
+        key=f"navigation_{page_name}"
+    ):
+
         st.session_state.page = page_name
 
+
 st.sidebar.divider()
+
 st.sidebar.subheader("Patient Sensor Data")
 
 uploaded_file = st.sidebar.file_uploader(
@@ -497,18 +785,31 @@ uploaded_file = st.sidebar.file_uploader(
 patient_data = None
 
 if uploaded_file is not None:
+
     try:
-        patient_data = pd.read_csv(BytesIO(uploaded_file.getvalue()))
+
+        patient_data = pd.read_csv(
+            BytesIO(uploaded_file.getvalue())
+        )
 
         if patient_data.empty:
+
             st.sidebar.error("The uploaded CSV has no records.")
             patient_data = None
+
         else:
+
             st.sidebar.success("CSV uploaded successfully!")
-            st.sidebar.caption(f"{len(patient_data):,} patient records")
+
+            st.sidebar.caption(
+                f"{len(patient_data):,} patient records"
+            )
 
     except Exception as error:
-        st.sidebar.error(f"CSV reading error: {error}")
+
+        st.sidebar.error(
+            f"CSV reading error: {error}"
+        )
 
 
 # ============================================================
@@ -520,14 +821,15 @@ st.markdown(
     <h1 style="text-align:center; margin-bottom:0;">
         Edge AI Based Patient Monitoring System
     </h1>
+
     <p style="text-align:center;">
         Resource-Aware Intelligent Offloading
     </p>
+
     <hr>
     """,
     unsafe_allow_html=True
 )
-
 
 
 # ============================================================
@@ -572,17 +874,58 @@ if st.session_state.page == "Project Overview":
         """
     )
 
-    overview_metrics = st.columns(4)
-    overview_metrics[0].metric("Samples", "10,000")
-    overview_metrics[1].metric("Prediction tasks", "40,000")
-    overview_metrics[2].metric("Final accuracy", "99.7775%")
-    overview_metrics[3].metric("Cloud offloading", "1.74%")
+    system_comparison, target_comparison = load_comparison_data()
 
-    st.caption(
-        "The detailed results and comparative visualizations are available "
-        "under the EdgeSimPy Simulation page. The currently displayed "
-        "metrics are from the confidence-based patient-monitoring experiment."
-    )
+    if system_comparison is not None:
+
+        accuracy = get_comparison_metric(
+            system_comparison,
+            "Accuracy (%)",
+            "Custom Adaptive"
+        )
+
+        offload = get_comparison_metric(
+            system_comparison,
+            "Cloud Offloading (%)",
+            "Custom Adaptive"
+        )
+
+        total_tasks = get_comparison_metric(
+            system_comparison,
+            "Total Tasks",
+            "Custom Adaptive"
+        )
+
+        overview_metrics = st.columns(4)
+
+        overview_metrics[0].metric(
+            "Samples",
+            "10,000"
+        )
+
+        overview_metrics[1].metric(
+            "Prediction Tasks",
+            f"{int(total_tasks):,}"
+        )
+
+        overview_metrics[2].metric(
+            "Custom Accuracy",
+            f"{accuracy:.4f}%"
+        )
+
+        overview_metrics[3].metric(
+            "Custom Cloud Offloading",
+            f"{offload:.4f}%"
+        )
+
+    else:
+
+        overview_metrics = st.columns(4)
+
+        overview_metrics[0].metric("Samples", "10,000")
+        overview_metrics[1].metric("Prediction Tasks", "40,000")
+        overview_metrics[2].metric("Accuracy", "—")
+        overview_metrics[3].metric("Cloud Offloading", "—")
 
     st.divider()
 
@@ -629,7 +972,7 @@ if st.session_state.page == "Project Overview":
 
     st.info(
         f"""
-        Current configuration:
+        Current application configuration:
 
         - Confidence threshold: {CONFIDENCE_THRESHOLD * 100:.0f}%
         - Maximum CPU usage: {MAX_CPU_USAGE_PERCENT}%
@@ -661,14 +1004,18 @@ if st.session_state.page == "Project Overview":
     col1, col2 = st.columns(2)
 
     with col1:
+
         st.markdown("### Edge Model")
+
         st.write(
             "Logistic Regression is used for lightweight "
             "local prediction."
         )
 
     with col2:
+
         st.markdown("### Cloud Model")
+
         st.write(
             "MLP Neural Network is used for Cloud-side "
             "prediction."
@@ -695,8 +1042,9 @@ if st.session_state.page == "Project Overview":
     - **Resource Monitoring:** Monitor CPU, RAM and network.
     - **Experiment Results:** Explore saved experimental
       results and visualizations.
-    - **EdgeSimPy Simulation:** View simulation metrics,
-      execution distribution, latency comparisons and graphs.
+    - **EdgeSimPy Simulation:** View simulation metrics.
+    - **Comparison Results:** Compare Custom Adaptive and
+      EdgeSimPy using interactive Plotly charts.
     """)
 
     st.warning(
@@ -712,7 +1060,6 @@ if st.session_state.page == "Project Overview":
     )
 
 
-
 # ============================================================
 # RUN PREDICTIONS
 # ============================================================
@@ -722,26 +1069,36 @@ elif st.session_state.page == "Run Predictions":
     st.title("Run Predictions")
 
     st.write(
-        "Select one patient record and run the selected processing strategy "
-        "for all four patient-monitoring targets."
+        "Select one patient record and run the selected processing "
+        "strategy for all four patient-monitoring targets."
     )
 
     if patient_data is None:
-        st.warning("Upload a patient CSV file using the sidebar first.")
+
+        st.warning(
+            "Upload a patient CSV file using the sidebar first."
+        )
 
     else:
+
         missing_columns = [
-            column for column in FEATURE_COLUMNS
+            column
+            for column in FEATURE_COLUMNS
             if column not in patient_data.columns
         ]
 
         if missing_columns:
-            st.error(f"Missing required sensor features: {missing_columns}")
+
+            st.error(
+                f"Missing required sensor features: {missing_columns}"
+            )
 
         else:
+
             col1, col2 = st.columns(2)
 
             with col1:
+
                 selected_row = st.selectbox(
                     "Select CSV record",
                     options=list(range(len(patient_data))),
@@ -749,6 +1106,7 @@ elif st.session_state.page == "Run Predictions":
                 )
 
             with col2:
+
                 st.text_input(
                     "Processing strategy",
                     value="Adaptive Offloading",
@@ -758,20 +1116,29 @@ elif st.session_state.page == "Run Predictions":
             selected_strategy = "Adaptive Offloading"
 
             with st.expander("Preview selected patient record"):
+
                 st.dataframe(
                     patient_data.iloc[[selected_row]],
                     use_container_width=True
                 )
 
-            if st.button("Run Predictions for All 4 Targets", type="primary"):
-                input_data = patient_data[FEATURE_COLUMNS].iloc[[selected_row]]
+            if st.button(
+                "Run Predictions for All 4 Targets",
+                type="primary"
+            ):
+
+                input_data = patient_data[
+                    FEATURE_COLUMNS
+                ].iloc[[selected_row]]
 
                 try:
+
                     results = []
 
                     progress = st.progress(0)
 
                     for index, target_name in enumerate(TARGETS):
+
                         result = run_one_target(
                             target_name,
                             selected_strategy,
@@ -779,23 +1146,40 @@ elif st.session_state.page == "Run Predictions":
                             models,
                             scalers
                         )
+
                         results.append(result)
-                        progress.progress((index + 1) / len(TARGETS))
 
-                    st.session_state.prediction_results = pd.DataFrame(results)
-                    st.session_state.prediction_strategy = selected_strategy
+                        progress.progress(
+                            (index + 1) / len(TARGETS)
+                        )
 
-                    st.success("All four predictions completed!")
+                    st.session_state.prediction_results = (
+                        pd.DataFrame(results)
+                    )
+
+                    st.session_state.prediction_strategy = (
+                        selected_strategy
+                    )
+
+                    st.success(
+                        "All four predictions completed!"
+                    )
 
                 except Exception as error:
-                    st.error(f"Prediction failed: {error}")
+
+                    st.error(
+                        f"Prediction failed: {error}"
+                    )
 
             if st.session_state.prediction_results is not None:
+
                 results_df = st.session_state.prediction_results
 
                 st.divider()
+
                 st.subheader(
-                    f"Prediction Results — {st.session_state.prediction_strategy}"
+                    f"Prediction Results — "
+                    f"{st.session_state.prediction_strategy}"
                 )
 
                 display_columns = [
@@ -810,86 +1194,105 @@ elif st.session_state.page == "Run Predictions":
                     "Available RAM (MB)"
                 ]
 
+                available_columns = [
+                    column
+                    for column in display_columns
+                    if column in results_df.columns
+                ]
+
                 st.dataframe(
-                    results_df[display_columns],
+                    results_df[available_columns],
                     use_container_width=True,
                     hide_index=True
                 )
 
                 for _, result in results_df.iterrows():
+
                     with st.expander(str(result["Target"])):
+
                         col1, col2, col3 = st.columns(3)
 
                         with col1:
+
                             st.metric(
                                 "Predicted Class",
                                 int(result["Prediction"])
                             )
 
                         with col2:
+
                             st.metric(
                                 "Confidence",
                                 f'{result["Confidence (%)"]:.2f}%'
                             )
 
                         with col3:
+
                             st.metric(
                                 "Selected Model",
                                 result["Selected Model"]
                             )
 
                         st.write(
-                            f'Edge confidence: {result["Edge Confidence (%)"]:.2f}%'
+                            f'Edge confidence: '
+                            f'{result["Edge Confidence (%)"]:.2f}%'
                         )
+
                         st.write(
-                            f'Edge inference latency: {result["Edge Latency (ms)"]:.4f} ms'
+                            f'Edge inference latency: '
+                            f'{result["Edge Latency (ms)"]:.4f} ms'
                         )
 
-                        st.info(result["Decision Reason"])
+                        st.info(
+                            result.get(
+                                "Decision Reason",
+                                "No decision reason available."
+                            )
+                        )
 
-                        if pd.notna(result.get("CPU Usage (%)")):
+                        if pd.notna(
+                            result.get("CPU Usage (%)")
+                        ):
+
                             st.subheader("Resource Check")
+
                             resource_col1, resource_col2 = st.columns(2)
+
                             with resource_col1:
+
                                 st.metric(
                                     "Current CPU Usage",
-                                    f'{result["CPU Usage (%)"]:.2f}%',
-                                    delta=f'Threshold: {MAX_CPU_USAGE_PERCENT}%',
-                                    delta_color="inverse"
+                                    f'{result["CPU Usage (%)"]:.2f}%'
                                 )
+
                             with resource_col2:
+
                                 st.metric(
                                     "Available RAM",
-                                    f'{result["Available RAM (MB)"]:.2f} MB',
-                                    delta=f'Minimum: {MIN_AVAILABLE_RAM_MB} MB',
-                                    delta_color="normal"
+                                    f'{result["Available RAM (MB)"]:.2f} MB'
                                 )
-                            st.caption(
-                                "Cloud resource rule: CPU must be below "
-                                f"{MAX_CPU_USAGE_PERCENT}% and available RAM must be "
-                                f"above {MIN_AVAILABLE_RAM_MB} MB."
+
+                        if pd.notna(
+                            result.get("Cloud Latency (ms)")
+                        ):
+
+                            st.write(
+                                f'Cloud inference latency: '
+                                f'{result["Cloud Latency (ms)"]:.4f} ms'
                             )
 
-                        if pd.notna(result["Cloud Latency (ms)"]):
+                        if pd.notna(
+                            result.get("Network Delay (ms)")
+                        ):
+
                             st.write(
-                                f'Cloud inference latency: {result["Cloud Latency (ms)"]:.4f} ms'
+                                f'Network delay: '
+                                f'{result["Network Delay (ms)"]:.4f} ms'
                             )
 
-                        if pd.notna(result["Network Delay (ms)"]):
-                            st.write(
-                                f'Network delay: {result["Network Delay (ms)"]:.4f} ms'
-                            )
-
-                        if pd.notna(result["Resource Pressure"]):
-                            st.write(
-                                f'Resource pressure: {result["Resource Pressure"]}'
-                            )
-                            st.write(
-                                f'Cloud feasible under {DEADLINE_MS} ms deadline: '
-                                f'{result["Cloud Feasible"]}'
-                            )
-
-                csv_bytes = results_df.to_csv(index=False).encode("utf-8")
+                csv_bytes = results_df.to_csv(
+                    index=False
+                ).encode("utf-8")
 
                 st.download_button(
                     "Download Prediction Results",
@@ -912,19 +1315,31 @@ elif st.session_state.page == "Strategy Comparison":
 
     st.title("Strategy Comparison")
 
-    summary = read_result_file("overall_strategy_summary")
+    summary = read_result_file(
+        "overall_strategy_summary"
+    )
 
     if summary is None:
+
         st.warning(
-            "overall_strategy_summary result file was not found in the "
-            "results or Results folder."
+            "overall_strategy_summary result file was not found."
         )
 
     else:
-        st.subheader("Overall Strategy Summary")
-        st.dataframe(summary, use_container_width=True, hide_index=True)
 
-        if "Strategy" in summary.columns and "Accuracy" in summary.columns:
+        st.subheader("Overall Strategy Summary")
+
+        st.dataframe(
+            summary,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        if {
+            "Strategy",
+            "Accuracy"
+        }.issubset(summary.columns):
+
             accuracy_chart = px.bar(
                 summary,
                 x="Strategy",
@@ -932,9 +1347,17 @@ elif st.session_state.page == "Strategy Comparison":
                 title="Accuracy by Strategy",
                 text_auto=".4f"
             )
-            st.plotly_chart(accuracy_chart, use_container_width=True)
 
-        if "Average Latency (ms)" in summary.columns:
+            st.plotly_chart(
+                accuracy_chart,
+                use_container_width=True
+            )
+
+        if {
+            "Strategy",
+            "Average Latency (ms)"
+        }.issubset(summary.columns):
+
             latency_chart = px.bar(
                 summary,
                 x="Strategy",
@@ -942,9 +1365,17 @@ elif st.session_state.page == "Strategy Comparison":
                 title="Average Latency by Strategy",
                 text_auto=".4f"
             )
-            st.plotly_chart(latency_chart, use_container_width=True)
 
-        if "F1 Score" in summary.columns:
+            st.plotly_chart(
+                latency_chart,
+                use_container_width=True
+            )
+
+        if {
+            "Strategy",
+            "F1 Score"
+        }.issubset(summary.columns):
+
             f1_chart = px.bar(
                 summary,
                 x="Strategy",
@@ -952,7 +1383,11 @@ elif st.session_state.page == "Strategy Comparison":
                 title="F1 Score by Strategy",
                 text_auto=".4f"
             )
-            st.plotly_chart(f1_chart, use_container_width=True)
+
+            st.plotly_chart(
+                f1_chart,
+                use_container_width=True
+            )
 
 
 # ============================================================
@@ -964,73 +1399,112 @@ elif st.session_state.page == "Resource Monitoring":
     st.title("Resource Monitoring")
 
     st.write(
-        "Measure the current laptop resources and network conditions "
-        "used by the adaptive offloading demonstration."
+        "Measure the current laptop resources and network conditions."
     )
 
-    if st.button("Measure Current Resources", type="primary"):
+    if st.button(
+        "Measure Current Resources",
+        type="primary"
+    ):
 
         try:
+
             resources, cpu, ram = get_resource_values()
-            network, upload, download, network_latency = get_network_values()
 
-            if cpu is None:
-                st.warning(
-                    "CPU value was not identified. Resource keys returned: "
-                    f"{list(resources.keys())}"
-                )
-            else:
-                st.metric("CPU Usage", f"{float(cpu):.2f}%")
+            network, upload, download, network_latency = (
+                get_network_values()
+            )
 
-            if ram is None:
-                st.warning(
-                    "Available RAM value was not identified. Resource keys returned: "
-                    f"{list(resources.keys())}"
+            if cpu is not None:
+
+                st.metric(
+                    "CPU Usage",
+                    f"{float(cpu):.2f}%"
                 )
+
             else:
-                st.metric("Available RAM", f"{float(ram):.2f} MB")
+
+                st.warning(
+                    "CPU value was not identified."
+                )
+
+            if ram is not None:
+
+                st.metric(
+                    "Available RAM",
+                    f"{float(ram):.2f} MB"
+                )
+
+            else:
+
+                st.warning(
+                    "Available RAM value was not identified."
+                )
 
             col1, col2, col3 = st.columns(3)
 
             with col1:
+
                 st.metric(
                     "Upload Speed",
-                    "Unavailable" if upload is None else f"{float(upload):.2f} Mbps"
+                    "Unavailable"
+                    if upload is None
+                    else f"{float(upload):.2f} Mbps"
                 )
 
             with col2:
+
                 st.metric(
                     "Download Speed",
-                    "Unavailable" if download is None else f"{float(download):.2f} Mbps"
+                    "Unavailable"
+                    if download is None
+                    else f"{float(download):.2f} Mbps"
                 )
 
             with col3:
+
                 st.metric(
                     "Network Latency",
-                    "Unavailable" if network_latency is None else f"{float(network_latency):.2f} ms"
+                    "Unavailable"
+                    if network_latency is None
+                    else f"{float(network_latency):.2f} ms"
                 )
 
             if cpu is not None and ram is not None:
+
                 pressure = (
                     float(cpu) >= MAX_CPU_USAGE_PERCENT
                     or float(ram) <= MIN_AVAILABLE_RAM_MB
                 )
 
                 if pressure:
-                    st.warning("Resource Pressure: TRUE")
+
+                    st.warning(
+                        "Resource Pressure: TRUE"
+                    )
+
                 else:
-                    st.success("Resource Pressure: FALSE")
+
+                    st.success(
+                        "Resource Pressure: FALSE"
+                    )
 
             st.subheader("Raw System Resource Values")
+
             st.json(resources)
 
             st.subheader("Raw Network Values")
+
             st.json(network)
 
         except Exception as error:
-            st.error(f"Resource measurement failed: {error}")
+
+            st.error(
+                f"Resource measurement failed: {error}"
+            )
 
     st.divider()
+
     st.subheader("Adaptive Offloading Configuration")
 
     config_df = pd.DataFrame({
@@ -1048,7 +1522,11 @@ elif st.session_state.page == "Resource Monitoring":
         ]
     })
 
-    st.dataframe(config_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        config_df,
+        use_container_width=True,
+        hide_index=True
+    )
 
 
 # ============================================================
@@ -1058,11 +1536,6 @@ elif st.session_state.page == "Resource Monitoring":
 elif st.session_state.page == "Experiment Results":
 
     st.title("Experiment Results")
-
-    st.write(
-        "Explore the saved training, testing, benchmarking, offloading, "
-        "deadline, and adaptive experiment results."
-    )
 
     experiment_tabs = st.tabs([
         "Model Benchmark",
@@ -1083,17 +1556,36 @@ elif st.session_state.page == "Experiment Results":
 
         st.subheader("Model Benchmark")
 
-        benchmark = read_result_file("model_benchmark")
+        benchmark = read_result_file(
+            "model_benchmark"
+        )
 
         if benchmark is None:
-            st.info("model_benchmark result file is not available.")
-        else:
-            st.dataframe(benchmark, use_container_width=True, hide_index=True)
 
-            if {"Target", "Edge Accuracy", "Cloud Accuracy"}.issubset(benchmark.columns):
+            st.info(
+                "model_benchmark result file is not available."
+            )
+
+        else:
+
+            st.dataframe(
+                benchmark,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            if {
+                "Target",
+                "Edge Accuracy",
+                "Cloud Accuracy"
+            }.issubset(benchmark.columns):
+
                 plot_data = benchmark.melt(
                     id_vars="Target",
-                    value_vars=["Edge Accuracy", "Cloud Accuracy"],
+                    value_vars=[
+                        "Edge Accuracy",
+                        "Cloud Accuracy"
+                    ],
                     var_name="Model",
                     value_name="Accuracy"
                 )
@@ -1106,12 +1598,24 @@ elif st.session_state.page == "Experiment Results":
                     barmode="group",
                     title="Edge vs Cloud Accuracy"
                 )
-                st.plotly_chart(fig, use_container_width=True)
 
-            if {"Target", "Edge F1", "Cloud F1"}.issubset(benchmark.columns):
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
+
+            if {
+                "Target",
+                "Edge F1",
+                "Cloud F1"
+            }.issubset(benchmark.columns):
+
                 plot_data = benchmark.melt(
                     id_vars="Target",
-                    value_vars=["Edge F1", "Cloud F1"],
+                    value_vars=[
+                        "Edge F1",
+                        "Cloud F1"
+                    ],
                     var_name="Model",
                     value_name="F1 Score"
                 )
@@ -1124,25 +1628,11 @@ elif st.session_state.page == "Experiment Results":
                     barmode="group",
                     title="Edge vs Cloud F1 Score"
                 )
-                st.plotly_chart(fig, use_container_width=True)
 
-            if {"Target", "Edge Size (KB)", "Cloud Size (KB)"}.issubset(benchmark.columns):
-                plot_data = benchmark.melt(
-                    id_vars="Target",
-                    value_vars=["Edge Size (KB)", "Cloud Size (KB)"],
-                    var_name="Model",
-                    value_name="Model Size (KB)"
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
                 )
-
-                fig = px.bar(
-                    plot_data,
-                    x="Target",
-                    y="Model Size (KB)",
-                    color="Model",
-                    barmode="group",
-                    title="Model Size Comparison"
-                )
-                st.plotly_chart(fig, use_container_width=True)
 
     # --------------------------------------------------------
     # EDGE VS CLOUD
@@ -1152,30 +1642,60 @@ elif st.session_state.page == "Experiment Results":
 
         st.subheader("Edge Only Results")
 
-        edge_results = read_result_file("edge_only_results")
+        edge_results = read_result_file(
+            "edge_only_results"
+        )
 
         if edge_results is None:
-            st.info("edge_only_results file is not available.")
+
+            st.info(
+                "edge_only_results file is not available."
+            )
+
         else:
-            st.dataframe(edge_results, use_container_width=True, hide_index=True)
+
+            st.dataframe(
+                edge_results,
+                use_container_width=True,
+                hide_index=True
+            )
 
         st.subheader("Cloud Only Results")
 
-        cloud_results = read_result_file("cloud_only_results")
+        cloud_results = read_result_file(
+            "cloud_only_results"
+        )
 
         if cloud_results is None:
-            st.info("cloud_only_results file is not available.")
-        else:
-            st.dataframe(cloud_results, use_container_width=True, hide_index=True)
 
-            if {"Target", "Total Latency (ms)"}.issubset(cloud_results.columns):
+            st.info(
+                "cloud_only_results file is not available."
+            )
+
+        else:
+
+            st.dataframe(
+                cloud_results,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            if {
+                "Target",
+                "Total Latency (ms)"
+            }.issubset(cloud_results.columns):
+
                 fig = px.bar(
                     cloud_results,
                     x="Target",
                     y="Total Latency (ms)",
                     title="Cloud Total Latency by Target"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
 
     # --------------------------------------------------------
     # HYBRID
@@ -1185,39 +1705,40 @@ elif st.session_state.page == "Experiment Results":
 
         st.subheader("Hybrid Offloading Results")
 
-        hybrid_results = read_result_file("hybrid_results")
+        hybrid_results = read_result_file(
+            "hybrid_results"
+        )
 
         if hybrid_results is None:
-            st.info("hybrid_results file is not available.")
-        else:
-            st.dataframe(hybrid_results, use_container_width=True, hide_index=True)
 
-            if {"Target", "Offload Percentage"}.issubset(hybrid_results.columns):
+            st.info(
+                "hybrid_results file is not available."
+            )
+
+        else:
+
+            st.dataframe(
+                hybrid_results,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            if {
+                "Target",
+                "Offload Percentage"
+            }.issubset(hybrid_results.columns):
+
                 fig = px.bar(
                     hybrid_results,
                     x="Target",
                     y="Offload Percentage",
                     title="Hybrid Cloud Offload Percentage"
                 )
-                st.plotly_chart(fig, use_container_width=True)
 
-            if {"Target", "Edge Requests", "Cloud Requests"}.issubset(hybrid_results.columns):
-                plot_data = hybrid_results.melt(
-                    id_vars="Target",
-                    value_vars=["Edge Requests", "Cloud Requests"],
-                    var_name="Processing Location",
-                    value_name="Requests"
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
                 )
-
-                fig = px.bar(
-                    plot_data,
-                    x="Target",
-                    y="Requests",
-                    color="Processing Location",
-                    barmode="group",
-                    title="Hybrid Edge and Cloud Requests"
-                )
-                st.plotly_chart(fig, use_container_width=True)
 
     # --------------------------------------------------------
     # ADAPTIVE
@@ -1228,79 +1749,117 @@ elif st.session_state.page == "Experiment Results":
         st.subheader("Adaptive Offloading Results")
 
         adaptive_files = [
-            ("adaptive_results", "Adaptive Network Scenarios"),
-            ("final_adaptive_results", "Final Adaptive Results"),
-            ("accuracy_first_adaptive_results", "Accuracy-First Adaptive Results")
+            (
+                "adaptive_results",
+                "Adaptive Network Scenarios"
+            ),
+            (
+                "final_adaptive_results",
+                "Final Adaptive Results"
+            ),
+            (
+                "accuracy_first_adaptive_results",
+                "Accuracy-First Adaptive Results"
+            )
         ]
 
         for file_key, heading in adaptive_files:
-            st.markdown(f"#### {heading}")
 
-            adaptive_df = read_result_file(file_key)
+            st.markdown(
+                f"#### {heading}"
+            )
+
+            adaptive_df = read_result_file(
+                file_key
+            )
 
             if adaptive_df is None:
-                st.info(f"{file_key} file is not available.")
+
+                st.info(
+                    f"{file_key} file is not available."
+                )
+
             else:
+
                 st.dataframe(
                     adaptive_df,
                     use_container_width=True,
                     hide_index=True
                 )
 
-                if {"Network", "Offload Percentage"}.issubset(adaptive_df.columns):
+                if {
+                    "Network",
+                    "Offload Percentage"
+                }.issubset(adaptive_df.columns):
+
                     fig = px.bar(
                         adaptive_df,
                         x="Network",
                         y="Offload Percentage",
-                        color="Target" if "Target" in adaptive_df.columns else None,
+                        color=(
+                            "Target"
+                            if "Target" in adaptive_df.columns
+                            else None
+                        ),
                         barmode="group",
                         title=f"{heading}: Offload Percentage"
                     )
-                    st.plotly_chart(fig, use_container_width=True)
 
-                if {"Network", "Estimated Cloud Response (ms)"}.issubset(adaptive_df.columns):
-                    fig = px.bar(
-                        adaptive_df,
-                        x="Network",
-                        y="Estimated Cloud Response (ms)",
-                        color="Target" if "Target" in adaptive_df.columns else None,
-                        barmode="group",
-                        title=f"{heading}: Estimated Cloud Response"
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
                     )
-                    st.plotly_chart(fig, use_container_width=True)
 
     # --------------------------------------------------------
-    # DEADLINE EXPERIMENT
+    # DEADLINE
     # --------------------------------------------------------
 
     with experiment_tabs[4]:
 
         st.subheader("Deadline Experiment Results")
 
-        deadline_results = read_result_file("deadline_test_results")
+        deadline_results = read_result_file(
+            "deadline_test_results"
+        )
 
         if deadline_results is None:
-            st.info("deadline_test_results file is not available.")
+
+            st.info(
+                "deadline_test_results file is not available."
+            )
+
         else:
+
             st.dataframe(
                 deadline_results,
                 use_container_width=True,
                 hide_index=True
             )
 
-            if {"Target", "Estimated Cloud Response (ms)"}.issubset(deadline_results.columns):
+            if {
+                "Target",
+                "Estimated Cloud Response (ms)"
+            }.issubset(deadline_results.columns):
+
                 fig = px.bar(
                     deadline_results,
                     x="Target",
                     y="Estimated Cloud Response (ms)",
                     title="Estimated Cloud Response Time"
                 )
+
                 fig.add_hline(
                     y=DEADLINE_MS,
                     line_dash="dash",
-                    annotation_text=f"Current app deadline: {DEADLINE_MS} ms"
+                    annotation_text=(
+                        f"App deadline: {DEADLINE_MS} ms"
+                    )
                 )
-                st.plotly_chart(fig, use_container_width=True)
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True
+                )
 
     # --------------------------------------------------------
     # RESOURCE PRESSURE
@@ -1308,289 +1867,877 @@ elif st.session_state.page == "Experiment Results":
 
     with experiment_tabs[5]:
 
-        st.subheader("Resource Pressure Experiment Results")
+        st.subheader("Resource Pressure Results")
 
-        pressure_results = read_result_file("resource_pressure_test_results")
+        pressure_results = read_result_file(
+            "resource_pressure_test_results"
+        )
 
         if pressure_results is None:
+
             st.info(
-                "resource_pressure_test_results was not included in the uploaded "
-                "ZIP. Add that file to the results folder to display this experiment."
+                "resource_pressure_test_results was not found."
             )
+
         else:
+
             st.dataframe(
                 pressure_results,
                 use_container_width=True,
                 hide_index=True
             )
 
-            if {"Available RAM (MB)", "Offload Percentage"}.issubset(pressure_results.columns):
-                fig = px.scatter(
-                    pressure_results,
-                    x="Available RAM (MB)",
-                    y="Offload Percentage",
-                    color="Target" if "Target" in pressure_results.columns else None,
-                    title="Available RAM vs Offload Percentage"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            if {"CPU Usage (%)", "Offload Percentage"}.issubset(pressure_results.columns):
-                fig = px.scatter(
-                    pressure_results,
-                    x="CPU Usage (%)",
-                    y="Offload Percentage",
-                    color="Target" if "Target" in pressure_results.columns else None,
-                    title="CPU Usage vs Offload Percentage"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
     # --------------------------------------------------------
-    # SCENARIO COMPARISON
+    # SCENARIO
     # --------------------------------------------------------
 
     with experiment_tabs[6]:
 
         st.subheader("Scenario Comparison")
 
-        scenario_results = read_result_file("scenario_comparison")
+        scenario_results = read_result_file(
+            "scenario_comparison"
+        )
 
         if scenario_results is None:
+
             st.info(
-                "scenario_comparison.csv was visible in your screenshot but "
-                "was not included in the uploaded ZIP."
+                "scenario_comparison file is not available."
             )
+
         else:
+
             st.dataframe(
                 scenario_results,
                 use_container_width=True,
                 hide_index=True
             )
 
-            numeric_columns = scenario_results.select_dtypes(
-                include=np.number
-            ).columns.tolist()
-
-            if len(numeric_columns) >= 1:
-                selected_metric = st.selectbox(
-                    "Select scenario metric",
-                    numeric_columns,
-                    key="scenario_metric"
-                )
-
-                category_columns = [
-                    column for column in scenario_results.columns
-                    if column not in numeric_columns
-                ]
-
-                if category_columns:
-                    selected_category = category_columns[0]
-
-                    fig = px.bar(
-                        scenario_results,
-                        x=selected_category,
-                        y=selected_metric,
-                        title=f"{selected_metric} by {selected_category}"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
     # --------------------------------------------------------
-    # OVERALL PERFORMANCE
+    # OVERALL
     # --------------------------------------------------------
 
     with experiment_tabs[7]:
 
         st.subheader("Overall Strategy Performance")
 
-        overall_results = read_result_file("overall_strategy_summary")
+        overall_results = read_result_file(
+            "overall_strategy_summary"
+        )
 
         if overall_results is None:
-            st.info("overall_strategy_summary file is not available.")
+
+            st.info(
+                "overall_strategy_summary file is not available."
+            )
+
         else:
+
             st.dataframe(
                 overall_results,
                 use_container_width=True,
                 hide_index=True
             )
 
-            if {"Strategy", "Accuracy"}.issubset(overall_results.columns):
-                fig = px.bar(
-                    overall_results,
-                    x="Strategy",
-                    y="Accuracy",
-                    title="Overall Accuracy by Strategy",
-                    text_auto=".4f"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+            for metric in [
+                "Accuracy",
+                "F1 Score",
+                "Average Latency (ms)"
+            ]:
 
-            if {"Strategy", "F1 Score"}.issubset(overall_results.columns):
-                fig = px.bar(
-                    overall_results,
-                    x="Strategy",
-                    y="F1 Score",
-                    title="Overall F1 Score by Strategy",
-                    text_auto=".4f"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                if {
+                    "Strategy",
+                    metric
+                }.issubset(overall_results.columns):
 
-            if {"Strategy", "Average Latency (ms)"}.issubset(overall_results.columns):
-                fig = px.bar(
-                    overall_results,
-                    x="Strategy",
-                    y="Average Latency (ms)",
-                    title="Overall Average Latency by Strategy",
-                    text_auto=".4f"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                    fig = px.bar(
+                        overall_results,
+                        x="Strategy",
+                        y=metric,
+                        title=f"{metric} by Strategy"
+                    )
 
-        performance_image = None
+                    st.plotly_chart(
+                        fig,
+                        use_container_width=True
+                    )
 
-        for folder in RESULTS_DIR_CANDIDATES:
-            candidate = os.path.join(folder, "overall_performance.png")
-            if os.path.exists(candidate):
-                performance_image = candidate
-                break
-
-        if performance_image is not None:
-            st.subheader("Saved Overall Performance Plot")
-            st.image(performance_image, use_container_width=True)
-        else:
-            st.info("overall_performance.png was not found in the results folder.")
-
-        st.caption(
-            "Experiment tables and plots are loaded from saved result files. "
-            "Missing files are not replaced with estimated or fabricated results."
-        )
 
 # ============================================================
-# EDGESIMPY / OFFLOADING SIMULATION RESULTS
+# EDGESIMPY SIMULATION
 # ============================================================
 
 elif st.session_state.page == "EdgeSimPy Simulation":
 
     st.title("EdgeSimPy Simulation Results")
-    st.subheader("Confidence-Based Edge–Cloud Patient Monitoring")
+
+    st.subheader(
+        "Confidence-Based Edge–Cloud Patient Monitoring"
+    )
+
+    summary_path = os.path.join(
+        EDGESIMPY_RESULTS_DIR,
+        "edgesimpy_summary.csv"
+    )
+
+    predictions_path = os.path.join(
+        EDGESIMPY_RESULTS_DIR,
+        "edgesimpy_predictions.csv"
+    )
+
+    if not os.path.exists(summary_path):
+
+        st.error(
+            "EdgeSimPy summary CSV was not found."
+        )
+
+    else:
+
+        summary = pd.read_csv(summary_path)
+
+        predictions = None
+
+        if os.path.exists(predictions_path):
+
+            predictions = pd.read_csv(
+                predictions_path
+            )
+
+        # ----------------------------------------------------
+        # KPI
+        # ----------------------------------------------------
+
+        accuracy = summary["accuracy_percent"].iloc[0]
+
+        total_tasks = summary["total_tasks"].iloc[0]
+
+        cloud_tasks = summary["cloud_tasks"].iloc[0]
+
+        edge_tasks = summary["edge_tasks"].iloc[0]
+
+        offload = summary[
+            "cloud_offloading_percent"
+        ].iloc[0]
+
+        latency = summary[
+            "average_latency_ms"
+        ].iloc[0]
+
+        runtime = summary[
+            "total_simulation_time_minutes"
+        ].iloc[0]
+
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+        kpi1.metric(
+            "Accuracy",
+            f"{accuracy:.4f}%"
+        )
+
+        kpi2.metric(
+            "Total Tasks",
+            f"{total_tasks:,}"
+        )
+
+        kpi3.metric(
+            "Cloud Offloading",
+            f"{offload:.4f}%"
+        )
+
+        kpi4.metric(
+            "Runtime",
+            f"{runtime:.2f} min"
+        )
+
+        kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+
+        kpi5.metric(
+            "Edge Tasks",
+            f"{edge_tasks:,}"
+        )
+
+        kpi6.metric(
+            "Cloud Tasks",
+            f"{cloud_tasks:,}"
+        )
+
+        kpi7.metric(
+            "Edge Fallback",
+            f"{summary['edge_fallback_tasks'].iloc[0]:,}"
+        )
+
+        kpi8.metric(
+            "Confidence Threshold",
+            f"{summary['confidence_threshold'].iloc[0]:.2f}"
+        )
+
+        st.divider()
+
+        # ----------------------------------------------------
+        # EXECUTION DISTRIBUTION
+        # ----------------------------------------------------
+
+        st.subheader("Execution Distribution")
+
+        execution_df = pd.DataFrame({
+            "Execution": [
+                "Edge",
+                "Edge Fallback",
+                "Cloud"
+            ],
+            "Tasks": [
+                summary["edge_tasks"].iloc[0],
+                summary["edge_fallback_tasks"].iloc[0],
+                summary["cloud_tasks"].iloc[0]
+            ]
+        })
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            fig = px.pie(
+                execution_df,
+                names="Execution",
+                values="Tasks",
+                title="Task Distribution",
+                hole=0.4
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        with col2:
+
+            fig = px.bar(
+                execution_df,
+                x="Execution",
+                y="Tasks",
+                text="Tasks",
+                title="Task Count"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        st.divider()
+
+        # ----------------------------------------------------
+        # LATENCY
+        # ----------------------------------------------------
+
+        st.subheader("Latency Metrics")
+
+        latency_df = pd.DataFrame({
+            "Metric": [
+                "Average Latency",
+                "Average Edge Inference",
+                "Average Cloud Inference",
+                "Average Resource Check",
+                "Average Network Delay"
+            ],
+            "Value (ms)": [
+                summary["average_latency_ms"].iloc[0],
+                summary["average_edge_inference_ms"].iloc[0],
+                summary["average_cloud_inference_ms"].iloc[0],
+                summary[
+                    "average_resource_check_ms_all_tasks"
+                ].iloc[0],
+                summary["average_network_delay_ms"].iloc[0]
+            ]
+        })
+
+        fig = px.bar(
+            latency_df,
+            x="Metric",
+            y="Value (ms)",
+            title="Latency Components",
+            text="Value (ms)"
+        )
+
+        fig.update_layout(
+            yaxis_type="log"
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        st.dataframe(
+            latency_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.divider()
+
+        # ----------------------------------------------------
+        # TARGET-WISE ACCURACY
+        # ----------------------------------------------------
+
+        st.subheader("Target-Wise Accuracy")
+
+        if predictions is not None:
+
+            target_accuracy = (
+                predictions.groupby("target")["correct"]
+                .mean()
+                .reset_index()
+            )
+
+            target_accuracy["Accuracy (%)"] = (
+                target_accuracy["correct"] * 100
+            )
+
+            fig = px.bar(
+                target_accuracy,
+                x="target",
+                y="Accuracy (%)",
+                title="Accuracy by Target"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+            st.dataframe(
+                target_accuracy[
+                    ["target", "Accuracy (%)"]
+                ],
+                use_container_width=True,
+                hide_index=True
+            )
+
+        st.divider()
+
+        # ----------------------------------------------------
+        # SUMMARY
+        # ----------------------------------------------------
+
+        st.subheader("Full EdgeSimPy Summary")
+
+        st.dataframe(
+            summary,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.download_button(
+            "Download EdgeSimPy Summary",
+            data=summary.to_csv(index=False).encode("utf-8"),
+            file_name="edgesimpy_summary.csv",
+            mime="text/csv"
+        )
+
+
+# ============================================================
+# COMPARISON RESULTS  ⭐ NEW PAGE
+# ============================================================
+
+elif st.session_state.page == "Comparison Results":
+
+    st.title("System Comparison Results")
+
+    st.subheader(
+        "Custom Adaptive Offloading vs EdgeSimPy"
+    )
 
     st.write(
-        "Comparative visualizations of the completed simulation using "
-        "the supplied summary metrics. This experiment processed "
-        "10,000 samples across four targets (40,000 tasks)."
+        """
+        This page compares the results of both completed experiments
+        using the saved CSV files. No models are retrained and
+        no simulations are rerun.
+        """
     )
 
-    st.info(
-        "The metrics displayed below are from the completed confidence-based "
-        "offloading experiment. They should not be interpreted as raw "
-        "EdgeSimPy infrastructure metrics unless that experiment produced "
-        "this exact summary."
+    system_df, target_df = load_comparison_data()
+
+    if system_df is None:
+
+        st.error(
+            "system_comparison.csv was not found."
+        )
+
+        st.code(
+            SYSTEM_COMPARISON_PATH
+        )
+
+        st.stop()
+
+    if target_df is None:
+
+        st.warning(
+            "target_wise_comparison.csv was not found. "
+            "System-level comparison will still be available."
+        )
+
+    # --------------------------------------------------------
+    # SYSTEM VALUES
+    # --------------------------------------------------------
+
+    custom_accuracy = get_comparison_metric(
+        system_df,
+        "Accuracy (%)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_accuracy = get_comparison_metric(
+        system_df,
+        "Accuracy (%)",
+        "EdgeSimPy"
+    )
+
+    custom_f1 = get_comparison_metric(
+        system_df,
+        "Macro F1 Score (%)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_f1 = get_comparison_metric(
+        system_df,
+        "Macro F1 Score (%)",
+        "EdgeSimPy"
+    )
+
+    custom_latency = get_comparison_metric(
+        system_df,
+        "Average Latency (ms)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_latency = get_comparison_metric(
+        system_df,
+        "Average Latency (ms)",
+        "EdgeSimPy"
+    )
+
+    custom_offload = get_comparison_metric(
+        system_df,
+        "Cloud Offloading (%)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_offload = get_comparison_metric(
+        system_df,
+        "Cloud Offloading (%)",
+        "EdgeSimPy"
+    )
+
+    custom_edge = get_comparison_metric(
+        system_df,
+        "Total Edge Executions",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_edge = get_comparison_metric(
+        system_df,
+        "Total Edge Executions",
+        "EdgeSimPy"
+    )
+
+    custom_cloud = get_comparison_metric(
+        system_df,
+        "Cloud Tasks",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_cloud = get_comparison_metric(
+        system_df,
+        "Cloud Tasks",
+        "EdgeSimPy"
+    )
+
+    custom_adjusted_latency = get_comparison_metric(
+        system_df,
+        "Latency Excluding Resource Checks (ms)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_adjusted_latency = get_comparison_metric(
+        system_df,
+        "Latency Excluding Resource Checks (ms)",
+        "EdgeSimPy"
     )
 
     # --------------------------------------------------------
-    # FINAL KPI METRICS
+    # KPI CARDS
     # --------------------------------------------------------
 
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Overall Accuracy", "99.7775%")
-    kpi2.metric("Total Tasks", "40,000")
-    kpi3.metric("Cloud Offloading", "1.74%")
-    kpi4.metric("Simulation Runtime", "42.71 min")
+    st.header("Overall Performance")
 
-    kpi5, kpi6, kpi7, kpi8 = st.columns(4)
-    kpi5.metric("Edge Tasks", "39,135")
-    kpi6.metric("Cloud Tasks", "696")
-    kpi7.metric("Edge Fallback", "169")
-    kpi8.metric("Confidence Threshold", "90%")
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric(
+        "Custom Accuracy",
+        f"{custom_accuracy:.4f}%"
+    )
+
+    col2.metric(
+        "EdgeSimPy Accuracy",
+        f"{edgesimpy_accuracy:.4f}%"
+    )
+
+    col3.metric(
+        "Custom Macro F1",
+        f"{custom_f1:.4f}%"
+    )
+
+    col4.metric(
+        "EdgeSimPy Macro F1",
+        f"{edgesimpy_f1:.4f}%"
+    )
+
+    col5, col6, col7, col8 = st.columns(4)
+
+    col5.metric(
+        "Custom Latency",
+        f"{custom_latency:.4f} ms"
+    )
+
+    col6.metric(
+        "EdgeSimPy Latency",
+        f"{edgesimpy_latency:.4f} ms"
+    )
+
+    col7.metric(
+        "Custom Offloading",
+        f"{custom_offload:.4f}%"
+    )
+
+    col8.metric(
+        "EdgeSimPy Offloading",
+        f"{edgesimpy_offload:.4f}%"
+    )
 
     st.divider()
 
     # --------------------------------------------------------
-    # EXECUTION DISTRIBUTION
+    # ACCURACY & F1 COMPARISON
     # --------------------------------------------------------
 
-    st.subheader("1. Execution Distribution")
+    st.header("1. Accuracy and F1-Score Comparison")
 
-    execution_df = pd.DataFrame({
-        "Execution Mode": ["Edge", "Cloud", "Edge Fallback"],
-        "Tasks": [39135, 696, 169],
-        "Percentage": [97.8375, 1.74, 0.4225]
+    performance_df = pd.DataFrame({
+        "System": [
+            "Custom Adaptive",
+            "Custom Adaptive",
+            "EdgeSimPy",
+            "EdgeSimPy"
+        ],
+        "Metric": [
+            "Accuracy",
+            "Macro F1 Score",
+            "Accuracy",
+            "Macro F1 Score"
+        ],
+        "Value (%)": [
+            custom_accuracy,
+            custom_f1,
+            edgesimpy_accuracy,
+            edgesimpy_f1
+        ]
     })
 
-    left, right = st.columns(2)
-
-    with left:
-        fig = px.pie(
-            execution_df,
-            names="Execution Mode",
-            values="Tasks",
-            title="Distribution of 40,000 Tasks",
-            hole=0.45
-        )
-        fig.update_traces(textinfo="label+percent")
-        st.plotly_chart(fig, use_container_width=True)
-
-    with right:
-        fig = px.bar(
-            execution_df,
-            x="Execution Mode",
-            y="Tasks",
-            text="Tasks",
-            title="Task Count by Execution Mode"
-        )
-        fig.update_layout(yaxis_title="Number of Tasks")
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(execution_df, use_container_width=True, hide_index=True)
-
-    st.markdown(
-        """
-        **Interpretation:** Most tasks were completed directly on Edge.
-        Only low-confidence tasks with available Cloud resources were
-        offloaded. When Cloud resources were unavailable, the task
-        remained on Edge through fallback.
-        """
+    fig = px.bar(
+        performance_df,
+        x="Metric",
+        y="Value (%)",
+        color="System",
+        barmode="group",
+        text="Value (%)",
+        title="Accuracy and Macro F1-Score"
     )
 
-    st.divider()
+    fig.update_traces(
+        texttemplate="%{y:.4f}%",
+        textposition="outside"
+    )
+
+    fig.update_layout(
+        yaxis_title="Score (%)"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
 
     # --------------------------------------------------------
     # LATENCY COMPARISON
     # --------------------------------------------------------
 
-    st.subheader("2. Latency and Overhead Comparison")
+    st.header("2. Latency Comparison")
 
     latency_df = pd.DataFrame({
-        "Metric": [
-            "Average Edge inference",
-            "Average Cloud inference",
-            "Average resource check (all tasks)",
-            "Average network delay"
+        "System": [
+            "Custom Adaptive",
+            "EdgeSimPy"
         ],
-        "Latency (ms)": [
-            0.546135,
-            0.011522,
-            58.257700,
-            0.369054
+        "Reported Average Latency (ms)": [
+            custom_latency,
+            edgesimpy_latency
+        ],
+        "Latency Excluding Resource Checks (ms)": [
+            custom_adjusted_latency,
+            edgesimpy_adjusted_latency
+        ]
+    })
+
+    latency_plot_df = latency_df.melt(
+        id_vars="System",
+        var_name="Latency Type",
+        value_name="Latency (ms)"
+    )
+
+    fig = px.bar(
+        latency_plot_df,
+        x="System",
+        y="Latency (ms)",
+        color="Latency Type",
+        barmode="group",
+        title="Reported Latency vs Latency Excluding Resource Checks"
+    )
+
+    fig.update_layout(
+        yaxis_title="Latency (ms)"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+    st.dataframe(
+        latency_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.warning(
+        """
+        The reported average latencies are not directly equivalent
+        unless resource-monitoring overhead is measured and included
+        using the same method in both experiments.
+
+        The adjusted latency is displayed separately to show the
+        impact of resource-check overhead.
+        """
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # EDGE VS CLOUD TASK DISTRIBUTION
+    # --------------------------------------------------------
+
+    st.header("3. Edge vs Cloud Task Distribution")
+
+    custom_fallback = get_comparison_metric(
+        system_df,
+        "Edge Fallback Tasks",
+        "Custom Adaptive",
+        0
+    )
+
+    edgesimpy_fallback = get_comparison_metric(
+        system_df,
+        "Edge Fallback Tasks",
+        "EdgeSimPy",
+        0
+    )
+
+    execution_df = pd.DataFrame({
+        "System": [
+            "Custom Adaptive",
+            "Custom Adaptive",
+            "Custom Adaptive",
+            "EdgeSimPy",
+            "EdgeSimPy",
+            "EdgeSimPy"
+        ],
+        "Execution Type": [
+            "Edge Direct",
+            "Edge Fallback",
+            "Cloud",
+            "Edge Direct",
+            "Edge Fallback",
+            "Cloud"
+        ],
+        "Tasks": [
+            custom_edge - custom_fallback,
+            custom_fallback,
+            custom_cloud,
+            edgesimpy_edge - edgesimpy_fallback,
+            edgesimpy_fallback,
+            edgesimpy_cloud
         ]
     })
 
     fig = px.bar(
-        latency_df,
-        x="Metric",
-        y="Latency (ms)",
-        text="Latency (ms)",
-        title="Average Latency Components",
-        log_y=True
-    )
-    fig.update_traces(texttemplate="%{y:.4f} ms", textposition="outside")
-    fig.update_layout(yaxis_title="Milliseconds (log scale)")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(latency_df, use_container_width=True, hide_index=True)
-
-    st.caption(
-        "A logarithmic y-axis is used because the latency components differ "
-        "substantially in magnitude."
+        execution_df,
+        x="System",
+        y="Tasks",
+        color="Execution Type",
+        barmode="stack",
+        title="Task Execution Distribution",
+        text="Tasks"
     )
 
-    st.metric("Average overall latency", "59.1844 ms")
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+    st.dataframe(
+        execution_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # --------------------------------------------------------
+    # CLOUD OFFLOADING COMPARISON
+    # --------------------------------------------------------
+
+    st.header("4. Cloud Offloading Comparison")
+
+    offloading_df = pd.DataFrame({
+        "System": [
+            "Custom Adaptive",
+            "EdgeSimPy"
+        ],
+        "Cloud Offloading (%)": [
+            custom_offload,
+            edgesimpy_offload
+        ]
+    })
+
+    fig = px.bar(
+        offloading_df,
+        x="System",
+        y="Cloud Offloading (%)",
+        text="Cloud Offloading (%)",
+        title="Cloud Offloading Percentage"
+    )
+
+    fig.update_traces(
+        texttemplate="%{y:.4f}%",
+        textposition="outside"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+    st.dataframe(
+        offloading_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # TARGET-WISE COMPARISON
+    # --------------------------------------------------------
+
+    st.header("5. Target-Wise Performance")
+
+    if target_df is not None:
+
+        if "System" in target_df.columns:
+
+            target_df["System"] = (
+                target_df["System"].astype(str)
+            )
+
+        # Accuracy chart
+        if "Accuracy (%)" in target_df.columns:
+
+            fig = px.bar(
+                target_df,
+                x="Target",
+                y="Accuracy (%)",
+                color="System",
+                barmode="group",
+                title="Target-Wise Accuracy Comparison"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        # F1 chart
+        if "F1 Score (%)" in target_df.columns:
+
+            fig = px.bar(
+                target_df,
+                x="Target",
+                y="F1 Score (%)",
+                color="System",
+                barmode="group",
+                title="Target-Wise F1-Score Comparison"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        # Precision
+        if "Precision (%)" in target_df.columns:
+
+            fig = px.bar(
+                target_df,
+                x="Target",
+                y="Precision (%)",
+                color="System",
+                barmode="group",
+                title="Target-Wise Precision Comparison"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        # Recall
+        if "Recall (%)" in target_df.columns:
+
+            fig = px.bar(
+                target_df,
+                x="Target",
+                y="Recall (%)",
+                color="System",
+                barmode="group",
+                title="Target-Wise Recall Comparison"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        st.subheader("Target-Wise Results Table")
+
+        st.dataframe(
+            target_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.info(
+            "Target-wise comparison CSV is unavailable."
+        )
 
     st.divider()
 
@@ -1598,144 +2745,94 @@ elif st.session_state.page == "EdgeSimPy Simulation":
     # RESOURCE CHECK OVERHEAD
     # --------------------------------------------------------
 
-    st.subheader("3. Resource-Check Overhead")
+    st.header("6. Resource Monitoring Overhead")
+
+    custom_resource_check = get_comparison_metric(
+        system_df,
+        "Average Resource Check (ms/task)",
+        "Custom Adaptive"
+    )
+
+    edgesimpy_resource_check = get_comparison_metric(
+        system_df,
+        "Average Resource Check (ms/task)",
+        "EdgeSimPy"
+    )
 
     resource_df = pd.DataFrame({
-        "Category": [
-            "Average across all tasks",
-            "Average for low-confidence tasks"
+        "System": [
+            "Custom Adaptive",
+            "EdgeSimPy"
         ],
-        "Average Check Time (ms)": [
-            58.257700,
-            2693.997707
+        "Average Resource Check (ms)": [
+            custom_resource_check,
+            edgesimpy_resource_check
         ]
     })
 
     fig = px.bar(
         resource_df,
-        x="Category",
-        y="Average Check Time (ms)",
-        text="Average Check Time (ms)",
-        title="Resource-Check Time Comparison"
-    )
-    fig.update_traces(texttemplate="%{y:.2f} ms", textposition="outside")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(resource_df, use_container_width=True, hide_index=True)
-
-    st.metric("Total resource-check time", "2,330,308 ms", "≈ 38.84 minutes")
-
-    st.warning(
-        "Resource measurement is the major overhead in this experiment. "
-        "The low-confidence task checks take much longer on average than "
-        "model inference itself."
+        x="System",
+        y="Average Resource Check (ms)",
+        title="Resource Monitoring Overhead"
     )
 
-    st.divider()
-
-    # --------------------------------------------------------
-    # ACCURACY BY TARGET
-    # --------------------------------------------------------
-
-    st.subheader("4. Target-Wise Accuracy")
-
-    target_accuracy_df = pd.DataFrame({
-        "Target": [
-            "Abnormal heart rhythm",
-            "Fall detection",
-            "Fever event",
-            "Hypoxemia event"
-        ],
-        "Accuracy (%)": [99.46, 99.97, 99.81, 99.87]
-    })
-
-    fig = px.bar(
-        target_accuracy_df,
-        x="Target",
-        y="Accuracy (%)",
-        text="Accuracy (%)",
-        title="Accuracy Across Patient-Monitoring Targets",
-        range_y=[95, 100]
-    )
-    fig.update_traces(texttemplate="%{y:.2f}%", textposition="outside")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(target_accuracy_df, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # CLOUD OFFLOADING / FALLBACK
-    # --------------------------------------------------------
-
-    st.subheader("5. Cloud Offloading and Fallback")
-
-    offloading_df = pd.DataFrame({
-        "Decision": [
-            "High Edge confidence",
-            "Low confidence and Cloud available",
-            "Low confidence but Cloud unavailable"
-        ],
-        "Tasks": [39135, 696, 169]
-    })
-
-    fig = px.bar(
-        offloading_df,
-        x="Decision",
-        y="Tasks",
-        text="Tasks",
-        title="Tasks by Offloading Decision",
-        color="Decision"
-    )
-    fig.update_layout(xaxis_title="", yaxis_title="Task Count")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.dataframe(offloading_df, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # FINAL SUMMARY TABLE
-    # --------------------------------------------------------
-
-    st.subheader("6. Complete Simulation Summary")
-
-    summary_df = pd.DataFrame([{
-        "Total Samples": 10000,
-        "Total Tasks": 40000,
-        "Accuracy (%)": 99.7775,
-        "Confidence Threshold": 0.90,
-        "Low Confidence Tasks": 865,
-        "Edge Tasks": 39135,
-        "Edge Fallback Tasks": 169,
-        "Cloud Tasks": 696,
-        "Cloud Offloading (%)": 1.74,
-        "Average Latency (ms)": 59.18441197394945,
-        "Average Edge Inference (ms)": 0.5461351525125793,
-        "Average Cloud Inference (ms)": 0.011522145003982586,
-        "Average Resource Check (all tasks, ms)": 58.257700419998585,
-        "Average Resource Check (low confidence, ms)": 2693.9977072831716,
-        "Total Resource Check Time (ms)": 2330308.0167999435,
-        "Average Network Delay (ms)": 0.3690542564343129,
-        "Simulation Time (seconds)": 2562.7612057000224,
-        "Simulation Time (minutes)": 42.71268676166704
-    }])
-
-    st.dataframe(
-        summary_df.T.rename(columns={0: "Value"}),
+    st.plotly_chart(
+        fig,
         use_container_width=True
     )
 
+    st.dataframe(
+        resource_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.warning(
+        """
+        Resource-monitoring time depends on how each experiment
+        measured and accumulated resource-check operations.
+        Confirm that both systems use equivalent measurement
+        definitions before treating these values as a direct
+        benchmark.
+        """
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # FINAL COMPARISON TABLE
+    # --------------------------------------------------------
+
+    st.header("7. Complete Comparison Table")
+
+    st.dataframe(
+        system_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
     st.download_button(
-        "Download Simulation Summary CSV",
-        data=summary_df.to_csv(index=False).encode("utf-8"),
-        file_name="confidence_offloading_summary.csv",
+        "Download System Comparison CSV",
+        data=system_df.to_csv(index=False).encode("utf-8"),
+        file_name="system_comparison.csv",
         mime="text/csv"
     )
 
-    st.caption(
-        "Cloud inference was simulated using a separately saved Cloud model "
-        "on the same machine; this experiment did not execute on a remote "
-        "Cloud server. Results are for research demonstration, not clinical use."
+    if target_df is not None:
+
+        st.download_button(
+            "Download Target-Wise Comparison CSV",
+            data=target_df.to_csv(index=False).encode("utf-8"),
+            file_name="target_wise_comparison.csv",
+            mime="text/csv"
+        )
+
+    st.success(
+        "Comparison results loaded successfully from the saved CSV files."
     )
 
+    st.caption(
+        "All charts use saved experimental results. No simulations "
+        "were rerun while displaying this page."
+    )
