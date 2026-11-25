@@ -121,7 +121,7 @@ The experimental configuration uses the following thresholds:
 | Parameter | Threshold |
 |---|---:|
 | Edge confidence threshold | 90% |
-| Minimum upload bandwidth | 5 Mbps |
+| Minimum upload bandwidth | 3 Mbps |
 | Minimum download bandwidth | 2 Mbps |
 | Maximum network latency | 100 ms |
 | Maximum CPU utilization | 90% |
